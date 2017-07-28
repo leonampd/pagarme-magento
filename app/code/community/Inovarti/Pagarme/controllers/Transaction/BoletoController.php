@@ -44,14 +44,13 @@ class Inovarti_Pagarme_Transaction_BoletoController extends Mage_Core_Controller
 				$invoice->sendEmail($sendEmail);
 			}
 			if($request->getPost('current_status') == Inovarti_Pagarme_Model_Api::TRANSACTION_STATUS_REFUNDED){
-				
 				foreach ($order->getInvoiceCollection() as $invoice) {
-                    if (!$invoice->canCancel()) {
-                        Mage::log($this->__('Invoice cannot be cancelled.'), null, 'pagarme.log');
-                    }
-                    $invoice->cancel();
-                }
-                $order->cancel()->save();
+					if (!$invoice->canCancel()) {
+						Mage::log($this->__('Invoice cannot be cancelled.'), null, 'pagarme.log');
+					}
+					$invoice->cancel();
+				}
+				$order->cancel()->save();
 			}
 			$this->getResponse()->setBody('ok');
 			return;
