@@ -51,6 +51,7 @@ class Inovarti_Pagarme_Transaction_BoletoController extends Mage_Core_Controller
 					$invoice->cancel();
 				}
 				$order->cancel()->save();
+				$order->addStatusHistoryComment($this->__('Canceled by Pagarme via Boleto postback.'))->save();
 			}
 			$this->getResponse()->setBody('ok');
 			return;
