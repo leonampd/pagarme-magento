@@ -7,56 +7,74 @@
  */
 class Inovarti_Pagarme_Transaction_BoletoController extends Mage_Core_Controller_Front_Action
 {
-	public function postbackAction()
-	{
-		$pagarme = Mage::getModel('pagarme/api');
-		$request = $this->getRequest();
+    public function postbackAction()
+    {
+        $pagarme = Mage::getModel('pagarme/api');
+        $request = $this->getRequest();
 
-		$orderId = Mage::helper('pagarme')->getOrderIdByTransactionId($request->getPost('id'));
-		$order = Mage::getModel('sales/order')->load($orderId);
-				
-		if ($request->isPost()
-			&& $pagarme->validateFingerprint($request->getPost('id'), $request->getPost('fingerprint'))
-		) 
-		{
-			if($request->getPost('current_status') == Inovarti_Pagarme_Model_Api::TRANSACTION_STATUS_PAID){
+        if ($pagarme->validateFingerprint($request->getPost('id'), $request->getPost('fingerprint')) !== true
+            || $request->isPost() !== true) {
+            $this->_forward('400');
+        }
 
-				if (!$order->canInvoice()) {
-					Mage::log($this->__('The order does not allow creating an invoice.'), null, 'pagarme.log');
-					Mage::throwException($this->__('The order does not allow creating an invoice.'));
-				}
+        $order = Mage::getModel('sales/order')->load($orderId);
+        $orderId = Mage::helper('pagarme')->getOrderIdByTransactionId($request->getPost('id'));
+      
+        if ($request->getPost('current_status') == Inovarti_Pagarme_Model_Api::TRANSACTION_STATUS_WAITING_PAYMENT) {
+            $postbackTransaction = $request->getPost('transaction');
+            $payment = $order->getPayment();
 
-				$invoice = Mage::getModel('sales/service_order', $order)
-					->prepareInvoice()
-					->register()
-					->pay();
+            $payment->setPagarmeBoletoUrl($postbackTransaction['boleto_url'])
+                ->setPagarmeBoletoBarcode($postbackTransaction['boleto_barcode'])
+                ->setPagarmeBoletoExpirationDate($postbackTransaction['boleto_expiration_date'])
+                ->save();
 
-				$sendEmail = Mage::getStoreConfig('payment/pagarme_boleto/email_status_change');
+            $order->addStatusHistoryComment($this->__('Update by Pagar.me postback: boleto generated'))
+                ->save();
 
-				$invoice->setEmailSent(true);
-				$invoice->getOrder()->setIsInProcess(true);
+            $this->getResponse()->setBody('Ok - Boleto processed');
+            return;
+        } else if ($request->getPost('current_status') == Inovarti_Pagarme_Model_Api::TRANSACTION_STATUS_PAID) {
+            if (!$order->canInvoice()) {
+                Mage::log($this->__('The order does not allow creating an invoice.'), null, 'pagarme.log');
+                Mage::throwException($this->__('The order does not allow creating an invoice.'));
+            }
 
-				$transactionSave = Mage::getModel('core/resource_transaction')
-					->addObject($invoice)
-					->addObject($invoice->getOrder())
-					->save();
+            $invoice = Mage::getModel('sales/service_order', $order)
+                ->prepareInvoice()
+                ->register()
+                ->pay();
 
-				$invoice->sendEmail($sendEmail);
-			}
-			if($request->getPost('current_status') == Inovarti_Pagarme_Model_Api::TRANSACTION_STATUS_REFUNDED){
-				foreach ($order->getInvoiceCollection() as $invoice) {
-					if (!$invoice->canCancel()) {
-						Mage::log($this->__('Invoice cannot be cancelled.'), null, 'pagarme.log');
-					}
-					$invoice->cancel();
-				}
-				$order->cancel()->save();
-				$order->addStatusHistoryComment($this->__('Canceled by Pagarme via Boleto postback.'))->save();
-			}
-			$this->getResponse()->setBody('ok');
-			return;
-		}
+            $sendEmail = Mage::getStoreConfig('payment/pagarme_boleto/email_status_change');
 
-		$this->_forward('404');
-	}
+            $invoice->setEmailSent(true);
+            $invoice->getOrder()->setIsInProcess(true);
+
+            $transactionSave = Mage::getModel('core/resource_transaction')
+                ->addObject($invoice)
+                ->addObject($invoice->getOrder())
+                ->save();
+
+            $order->addStatusHistoryComment($this->__('Update by Pagar.me postback: boleto is paid'))
+                ->save();
+
+            $invoice->sendEmail($sendEmail);
+            $this->getResponse()->setBody('Ok - Boleto paid');
+            return;
+        } else if($request->getPost('current_status') == Inovarti_Pagarme_Model_Api::TRANSACTION_STATUS_REFUNDED) {
+            foreach ($order->getInvoiceCollection() as $invoice) {
+                if (!$invoice->canCancel()) {
+                    Mage::log($this->__('Cannot refund order.'), null, 'pagarme.log');
+                }
+                $invoice->cancel();
+            }
+            $order->cancel()->save();
+            $order->addStatusHistoryComment($this->__('Canceled by Pagarme via Boleto postback.'))->save();
+
+            $this->getResponse()->setBody('Ok - Order refunded');
+            return;
+        }
+      
+        $this->_forward('400');
+    }
 }
